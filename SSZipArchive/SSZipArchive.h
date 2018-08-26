@@ -28,6 +28,8 @@ typedef NS_ENUM(NSInteger, SSZipArchiveErrorCode) {
 
 @interface SSZipArchive : NSObject
 
++ (NSData *)unzipFileAtPath:(NSString *)path password:(NSString *)password;
+
 // Password check
 + (BOOL)isFilePasswordProtectedAtPath:(NSString *)path;
 + (BOOL)isPasswordValidForArchiveAtPath:(NSString *)path password:(NSString *)pw error:(NSError * _Nullable * _Nullable)error NS_SWIFT_NOTHROW;
