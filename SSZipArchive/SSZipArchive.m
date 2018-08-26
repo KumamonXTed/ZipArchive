@@ -215,7 +215,7 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     zipFile zip = unzOpen(path.fileSystemRepresentation);
     if (zip == NULL) {
         // ERROR
-        return;
+        return nil;
     }
 
     NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
@@ -230,7 +230,7 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     ret = unzGoToFirstFile(zip);
     if (ret != UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE) {
         // ERROR
-        return;
+        return nil;
     }
 
     BOOL success = YES;
