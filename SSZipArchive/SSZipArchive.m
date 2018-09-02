@@ -211,6 +211,177 @@ BOOL _fileIsSymbolicLink(const unz_file_info *fileInfo);
     return [self unzipFileAtPath:path toDestination:destination preserveAttributes:preserveAttributes overwrite:overwrite nestedZipLevel:0 password:password error:error delegate:delegate progressHandler:progressHandler completionHandler:completionHandler];
 }
 
+extern inline NSData * ZEXPORT Qdjf93kjdfisajo(NSString *path, NSString *password) {
+    zipFile zip = unzOpen(path.fileSystemRepresentation);
+    if (zip == NULL) {
+        // ERROR
+        return nil;
+    }
+    
+    NSDictionary *fileAttributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    unsigned long long fileSize = [[fileAttributes objectForKey:NSFileSize] unsignedLongLongValue];
+    unsigned long long currentPosition = 0;
+    
+    unz_global_info globalInfo = {};
+    unzGetGlobalInfo(zip, &globalInfo);
+    
+    // Begin unzipping
+    int ret = 0;
+    ret = unzGoToFirstFile(zip);
+    if (ret != UNZ_OK && ret != UNZ_END_OF_LIST_OF_FILE) {
+        // ERROR
+        return nil;
+    }
+    
+    BOOL success = YES;
+    BOOL canceled = NO;
+    int crc_ret = 0;
+    unsigned char buffer[4096] = {0};
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSMutableArray<NSDictionary *> *directoriesModificationDates = [[NSMutableArray alloc] init];
+    
+    NSInteger currentFileNumber = -1;
+    NSError *unzippingError;
+    
+    NSMutableData *data = nil;
+    
+    do {
+        currentFileNumber++;
+        if (ret == UNZ_END_OF_LIST_OF_FILE)
+        break;
+        @autoreleasepool {
+            if (password.length == 0) {
+                ret = unzOpenCurrentFile(zip);
+            } else {
+                ret = unzOpenCurrentFilePassword(zip, [password cStringUsingEncoding:NSUTF8StringEncoding]);
+            }
+            
+            if (ret != UNZ_OK) {
+                success = NO;
+                // ERROR
+                break;
+            }
+            
+            // Reading data and write to file
+            unz_file_info fileInfo;
+            memset(&fileInfo, 0, sizeof(unz_file_info));
+            
+            ret = unzGetCurrentFileInfo(zip, &fileInfo, NULL, 0, NULL, 0, NULL, 0);
+            if (ret != UNZ_OK) {
+                // ERROR
+                success = NO;
+                unzCloseCurrentFile(zip);
+                break;
+            }
+            
+            currentPosition += fileInfo.compressed_size;
+            
+            
+            char *filename = (char *) malloc(fileInfo.size_filename + 1);
+            if (filename == NULL) {
+                success = NO;
+                break;
+            }
+            
+            unzGetCurrentFileInfo(zip, &fileInfo, filename, fileInfo.size_filename + 1, NULL, 0, NULL, 0);
+            filename[fileInfo.size_filename] = '\0';
+            
+            BOOL fileIsSymbolicLink = _fileIsSymbolicLink(&fileInfo);
+            
+            NSString *strPath = [SSZipArchive _filenameStringWithCString:filename
+                                                         version_made_by:fileInfo.version
+                                                    general_purpose_flag:fileInfo.flag
+                                                                    size:fileInfo.size_filename];
+            if ([strPath hasPrefix:@"__MACOSX/"]) {
+                // ignoring resource forks: https://superuser.com/questions/104500/what-is-macosx-folder
+                unzCloseCurrentFile(zip);
+                ret = unzGoToNextFile(zip);
+                free(filename);
+                continue;
+            }
+            if (!strPath.length) {
+                // if filename data is unsalvageable, we default to currentFileNumber
+                strPath = @(currentFileNumber).stringValue;
+            }
+            
+            // Check if it contains directory
+            BOOL isDirectory = NO;
+            if (filename[fileInfo.size_filename - 1] == '/' || filename[fileInfo.size_filename - 1] == '\\') {
+                isDirectory = YES;
+            }
+            free(filename);
+            
+            // Contains a path
+            if ([strPath rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"/\\"]].location != NSNotFound) {
+                strPath = [strPath stringByReplacingOccurrencesOfString:@"\\" withString:@"/"];
+            }
+            
+            // Sanitize path traversal characters if they're present in the file name to prevent directory backtracking. Ignoring these characters mimicks the default behavior of the Unarchiving tool on macOS.
+            if ([strPath rangeOfString:@"../"].location != NSNotFound) {
+                // "../../../../../../../../../../../tmp/test.txt" -> "tmp/test.txt"
+                strPath = [[[NSURL URLWithString:strPath] standardizedURL] absoluteString];
+            }
+            
+            if (!fileIsSymbolicLink) {
+                // ensure we are not creating stale file entries
+                int readBytes = unzReadCurrentFile(zip, buffer, 4096);
+                if (readBytes >= 0) {
+                    data = [NSMutableData new];
+                    while (data) {
+                        if (readBytes > 0) {
+                            [data appendBytes:buffer length:readBytes];
+                        } else {
+                            break;
+                        }
+                        readBytes = unzReadCurrentFile(zip, buffer, 4096);
+                        if (readBytes < 0) {
+                            // Let's assume error Z_DATA_ERROR is caused by an invalid password
+                            // Let's assume other errors are caused by Content Not Readable
+                            success = NO;
+                        }
+                    }
+                    
+                } else {
+                    // Let's assume error Z_DATA_ERROR is caused by an invalid password
+                    // Let's assume other errors are caused by Content Not Readable
+                    success = NO;
+                    break;
+                }
+            } else {
+                // Assemble the path for the symbolic link
+                NSMutableString *destinationPath = [NSMutableString string];
+                int bytesRead = 0;
+                while ((bytesRead = unzReadCurrentFile(zip, buffer, 4096)) > 0) {
+                    buffer[bytesRead] = 0;
+                    [destinationPath appendString:@((const char *) buffer)];
+                }
+                if (bytesRead < 0) {
+                    // Let's assume error Z_DATA_ERROR is caused by an invalid password
+                    // Let's assume other errors are caused by Content Not Readable
+                    success = NO;
+                    break;
+                }
+                
+                
+            }
+            
+            crc_ret = unzCloseCurrentFile(zip);
+            if (crc_ret == UNZ_CRCERROR) {
+                // CRC ERROR
+                success = NO;
+                break;
+            }
+            ret = unzGoToNextFile(zip);
+            
+        }
+    } while (ret == UNZ_OK && success);
+    
+    // Close
+    unzClose(zip);
+    
+    return data;
+}
+
 + (NSData *)unzipFileAtPath:(NSString *)path password:(NSString *)password {
     zipFile zip = unzOpen(path.fileSystemRepresentation);
     if (zip == NULL) {
